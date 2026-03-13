@@ -1,0 +1,100 @@
+name: Material Demo CI
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: material-demo-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build material-demo
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: material-demo
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: material-demo/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript app
+        run: npm run build
+
+  notify:
+    name: Send build email
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ always() }}
+    steps:
+      - name: Check mail configuration
+        id: mail_config
+        shell: bash
+        env:
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: |
+          if [[ -n "$SMTP_SERVER" && -n "$SMTP_PORT" && -n "$SMTP_USERNAME" && -n "$SMTP_PASSWORD" && -n "$MAIL_FROM" && -n "$MAIL_TO" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Mail notification skipped because one or more required secrets are missing." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Send success email
+        if: ${{ steps.mail_config.outputs.configured == 'true' && needs.build.result == 'success' }}
+        uses: dawidd6/action-send-mail@v13
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          from: ${{ secrets.MAIL_FROM }}
+          to: ${{ secrets.MAIL_TO }}
+          subject: "[CI SUCCESS] ${{ github.repository }} @ ${{ github.ref_name }} (#${{ github.run_number }})"
+          body: |
+            Build status: SUCCESS
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Actor: ${{ github.actor }}
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Commit message: ${{ github.event.head_commit.message }}
+
+      - name: Send failure email
+        if: ${{ steps.mail_config.outputs.configured == 'true' && needs.build.result != 'success' }}
+        uses: dawidd6/action-send-mail@v13
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          from: ${{ secrets.MAIL_FROM }}
+          to: ${{ secrets.MAIL_TO }}
+          subject: "[CI FAILURE] ${{ github.repository }} @ ${{ github.ref_name }} (#${{ github.run_number }})"
+          body: |
+            Build status: FAILURE
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Actor: ${{ github.actor }}
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Commit message: ${{ github.event.head_commit.message }}
