@@ -18,6 +18,7 @@ app.get("/health", (_req: Request, res: Response) => {
 
 app.use("/api/materials", materialRouter);
 
+hello world
 app.use((_req: Request, res: Response) => {
   res.status(404).json({ error: "Route not found" });
 });
